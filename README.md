@@ -23,3 +23,12 @@ runtime test.
 
 This is a local privilege-escalation exploit. Run it only in a disposable,
 authorized test VM.
+
+## Provenance
+
+`dirtyfrag-exp.c` is the public combined exploit from
+[V4bel/dirtyfrag](https://github.com/V4bel/dirtyfrag), pinned at commit
+`aab16fcada27142dd8ce8704906cf6736cf213b8`. N4C added only the optional
+`DIRTYFRAG_LAB_NO_SHELL` validation guard and produced the static build used
+for the disposable-QEMU tests. The exploit logic is not claimed as N4C-authored
+code.
