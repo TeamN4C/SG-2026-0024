@@ -1,34 +1,71 @@
-# CVE-2026-43284 / CVE-2026-43500 Dirty Frag Exploit
+# SG-2026-0024 Dirty Frag Exploit
 
-This branch contains the public combined Dirty Frag exploit and the static
-x86-64 build used for N4C end-to-end validation.
+This branch contains the end-to-end local privilege-escalation exploit used by
+N4C to validate CVE-2026-43284 and CVE-2026-43500. The separate `poc` branch
+keeps the non-destructive fixture-only proof of concept.
+
+## Flow
+
+`dirtyfrag-exploit` has two exploit paths and one common privilege transition:
+
+1. **ESP** enters a user and network namespace, installs attacker-controlled
+   XFRM ESP state, then uses splice-backed receive processing to replace the
+   cached beginning of the setuid-root `/usr/bin/su` with a 192-byte x86-64
+   ELF. Executing `su` therefore executes the embedded root shell payload.
+2. **RxRPC** derives three RXKAD session keys for overlapping eight-byte
+   decryptions, triggers those decryptions against the read-only page cache of
+   `/etc/passwd`, and changes the first entry to `root::0:0:...`. A privileged
+   `su` consumer configured to accept an empty password then yields root.
+3. After either target change is verified, the exploit starts `su -` in a PTY
+   and bridges it to the caller's terminal.
+
+The default order is ESP first with RxRPC as a fallback. A method can be
+selected explicitly:
+
+```bash
+./dirtyfrag-exploit --esp --verbose
+./dirtyfrag-exploit --rxrpc
+```
+
+For a non-interactive disposable-lab check, `LPE_AUTO_VERIFY=1` makes the root
+shell print a marker, `id`, and `whoami`, then exit:
+
+```bash
+LPE_AUTO_VERIFY=1 ./dirtyfrag-exploit --esp --verbose </dev/null
+```
+
+## Build
+
+```bash
+make
+```
+
+The included binary is a statically linked x86-64 Linux build.
 
 ## Files
 
-- `dirtyfrag-exp.c`: ESP-first exploit with RxRPC fallback.
-- `dirtyfrag-exp`: statically linked x86-64 build.
+- `dirtyfrag-exploit.c` — readable combined exploit source.
+- `dirtyfrag-exploit` — statically linked x86-64 build.
+- `Makefile` — reproducible static build.
 
-## Exploit paths
+## Validation boundary
 
-- ESP replaces the cached image of a setuid-root `/usr/bin/su` with a small
-  root-shell ELF.
-- RxRPC changes the cached root entry in `/etc/passwd` to an empty password
-  field. The final transition depends on a privileged consumer accepting that
-  field, such as a PAM `nullok` configuration.
+N4C validated both paths from uid/gid 1000 to a real uid/gid 0 shell in a
+disposable Linux 7.0.4 QEMU guest. The RxRPC guest uses a dedicated setuid-root
+lab consumer that models the PAM `nullok` decision; that result is not evidence
+that every distribution's PAM configuration accepts an empty password.
 
-N4C confirmed both paths from uid/gid 1000 to a real uid/gid 0 shell in a
-disposable Linux 7.0.4 QEMU guest. The RxRPC test used an explicit setuid-root
-lab consumer that models the `nullok` decision; it was not a distribution PAM
-runtime test.
-
-This is a local privilege-escalation exploit. Run it only in a disposable,
-authorized test VM.
+Both methods are expected to fail without changing the target on Linux 7.0.6,
+which contains the tested rejection fixes.
 
 ## Provenance
 
-`dirtyfrag-exp.c` is the public combined exploit from
-[V4bel/dirtyfrag](https://github.com/V4bel/dirtyfrag), pinned at commit
-`aab16fcada27142dd8ce8704906cf6736cf213b8`. N4C added only the optional
-`DIRTYFRAG_LAB_NO_SHELL` validation guard and produced the static build used
-for the disposable-QEMU tests. The exploit logic is not claimed as N4C-authored
-code.
+The exploitation primitives and low-level protocol code are derived from the
+public [V4bel/dirtyfrag](https://github.com/V4bel/dirtyfrag) implementation at
+commit `aab16fcada27142dd8ce8704906cf6736cf213b8`. N4C reorganized that code into
+the single flow documented above, removed duplicate/dead validation paths, and
+added the common PTY transition and reproducible lab build. The underlying
+exploit technique is not claimed as an N4C clean-room implementation.
+
+Use this code only in an authorized, disposable test environment. Both paths
+modify privileged file contents in the page cache and can destabilize a host.
